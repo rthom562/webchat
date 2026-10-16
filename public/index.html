@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Webchat</title>
+  <style>
+    :root { --rail: #1e1f22; --side: #2b2d31; --bg: #313338; --dark: #1e1f22; --input: #383a40; --hover: #35373c; --active: #404249;
+            --text: #dbdee1; --muted: #949ba4; --accent: #5865f2; --green: #23a55a; --red: #f23f43; }
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; display: flex; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; overflow: hidden; }
+    button { font: inherit; cursor: pointer; }
+
+    /* server rail */
+    #rail { width: 72px; background: var(--rail); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 8px; flex-shrink: 0; }
+    #serverIcons { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; align-items: center; width: 100%; scrollbar-width: none; }
+    .srv { position: relative; width: 48px; height: 48px; border-radius: 50%; background: var(--bg); color: var(--text); border: none; padding: 0; overflow: visible;
+           display: grid; place-items: center; font-weight: 600; font-size: 15px; transition: border-radius .15s, background .15s; flex-shrink: 0; }
+    .srv img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+    .srv:hover, .srv.active { border-radius: 16px; background: var(--accent); }
+    .srv.active::before { content: ''; position: absolute; left: -12px; width: 4px; height: 40px; border-radius: 0 4px 4px 0; background: #fff; }
+    .srv .lock { position: absolute; right: -4px; bottom: -4px; font-size: 12px; background: var(--rail); border-radius: 50%; padding: 2px; line-height: 1; }
+    #addServer { width: 48px; height: 48px; border-radius: 50%; border: none; background: var(--bg); color: var(--green); font-size: 26px; line-height: 1; transition: border-radius .15s, background .15s; flex-shrink: 0; }
+    #addServer:hover { border-radius: 16px; background: var(--green); color: #fff; }
+
+    /* channel sidebar */
+    aside { width: 240px; background: var(--side); display: flex; flex-direction: column; flex-shrink: 0; }
+    aside h1 { margin: 0; padding: 0 16px; height: 48px; display: flex; align-items: center; font-size: 15px; border-bottom: 1px solid var(--dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #channels { flex: 1; overflow-y: auto; padding: 8px; }
+    .category { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; margin: 14px 8px 4px; }
+    .chan { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; color: var(--muted); cursor: pointer; }
+    .chan:hover { background: var(--hover); color: var(--text); }
+    .chan.active { background: var(--active); color: #fff; }
+    .chan.unread { color: #fff; font-weight: 600; }
+    .chan .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chan .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; display: none; }
+    .chan.unread .dot { display: block; }
+    .chan.connected { color: var(--green); }
+    .people { margin: 0 0 4px 28px; }
+    .person { display: flex; align-items: center; gap: 8px; padding: 3px 6px; color: var(--muted); font-size: 14px; }
+    .person img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; outline: 2px solid transparent; outline-offset: 1px; }
+    .person.speaking img { outline-color: var(--green); }
+    .person .tag { font-size: 10px; background: var(--accent); color: #fff; border-radius: 3px; padding: 0 4px; }
+    .empty { color: var(--muted); padding: 16px 8px; font-size: 14px; }
+
+    #voicePanel { border-top: 1px solid var(--dark); padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+    #voicePanel .info { flex: 1; min-width: 0; font-size: 13px; }
+    #voicePanel .status { color: var(--green); font-weight: 600; }
+    #voicePanel .where { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .iconBtn { background: none; border: none; color: var(--text); border-radius: 4px; padding: 6px 8px; font-size: 16px; line-height: 1; }
+    .iconBtn:hover { background: var(--hover); }
+    .iconBtn.off { color: var(--red); }
+    #userPanel { background: #232428; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+    #userPanel img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
+    #userPanel .uname { flex: 1; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* chat */
+    main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    header { height: 48px; padding: 0 16px; display: flex; align-items: center; font-weight: 600; border-bottom: 1px solid var(--dark); flex-shrink: 0; }
+    #messages { flex: 1; overflow-y: auto; padding: 16px; }
+    .msg { display: flex; gap: 12px; margin-bottom: 14px; }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; object-fit: cover; background: var(--accent); display: grid; place-items: center; font-weight: 700; color: #fff; }
+    .name { font-weight: 600; }
+    .name.discord { color: #8ea1ff; }
+    .meta { color: var(--muted); font-size: 12px; margin-left: 6px; }
+    .content { white-space: pre-wrap; word-wrap: break-word; }
+    .content a { color: #00a8fc; }
+    .note { color: var(--muted); text-align: center; margin: 24px 0; }
+    form#send { display: flex; gap: 8px; padding: 0 16px 16px; }
+    input { padding: 10px 12px; border: none; border-radius: 8px; background: var(--input); color: var(--text); font: inherit; width: 100%; }
+    form#send input { flex: 1; }
+    input:disabled { opacity: .6; cursor: not-allowed; }
+    .primary { padding: 10px 16px; border: none; border-radius: 8px; background: var(--accent); color: #fff; }
+    .primary:disabled { opacity: .5; cursor: not-allowed; }
+    .secondary { padding: 10px 16px; border: none; border-radius: 8px; background: var(--input); color: var(--text); }
+
+    /* modals + toast */
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: grid; place-items: center; z-index: 10; }
+    .modal[hidden] { display: none; }
+    .modal form { background: var(--side); padding: 24px; border-radius: 12px; width: min(380px, 90vw); display: grid; gap: 12px; }
+    .modal h2 { margin: 0; font-size: 18px; }
+    .modal p { margin: 0; color: var(--muted); font-size: 14px; }
+    .modal .err { color: var(--red); min-height: 1em; font-size: 14px; }
+    .modal .row { display: flex; gap: 8px; justify-content: flex-end; }
+    .pfp { display: flex; align-items: center; gap: 12px; }
+    #pfpPreview { width: 72px; height: 72px; border-radius: 50%; background: var(--input); object-fit: cover; flex-shrink: 0; }
+    #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--red); color: #fff; padding: 10px 16px; border-radius: 8px; z-index: 20; max-width: 90vw; }
+    #toast[hidden] { display: none; }
+
+    @media (max-width: 700px) {
+      #rail { width: 60px; }
+      .srv, #addServer { width: 42px; height: 42px; }
+      aside { width: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <nav id="rail">
+    <div id="serverIcons"></div>
+    <button id="addServer" title="Join a private server by ID">+</button>
+  </nav>
+
+  <aside>
+    <h1 id="serverName">Pick a server</h1>
+    <div id="channels"><div class="empty">Choose a server on the left, or press + to join a private one.</div></div>
+    <div id="voicePanel" hidden>
+      <div class="info">
+        <div class="status">Voice Connected</div>
+        <div class="where" id="voiceWhere"></div>
+      </div>
+      <button class="iconBtn" id="muteBtn" title="Mute">🎙️</button>
+      <button class="iconBtn" id="leaveBtn" title="Disconnect">📞</button>
+    </div>
+    <div id="userPanel">
+      <img id="meAvatar" alt="">
+      <div class="uname" id="meName"></div>
+      <button class="iconBtn" id="editProfile" title="Edit profile">⚙️</button>
+    </div>
+  </aside>
+
+  <main>
+    <header id="channelTitle"></header>
+    <div id="messages"></div>
+    <form id="send">
+      <input id="text" autocomplete="off" maxlength="2000" disabled>
+      <button class="primary" id="sendButton" disabled>Send</button>
+    </form>
+  </main>
+
+  <div class="modal" id="profileModal" hidden>
+    <form id="profileForm">
+      <h2>Your profile</h2>
+      <p>This is how you'll appear in Discord.</p>
+      <div class="pfp">
+        <img id="pfpPreview" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">
+        <button type="button" class="secondary" id="pfpButton">Upload profile picture</button>
+        <input type="file" id="pfpFile" accept="image/*" hidden>
+      </div>
+      <input id="nameInput" placeholder="Display name" maxlength="32" required>
+      <div class="err" id="profileError"></div>
+      <div class="row"><button class="primary">Save</button></div>
+    </form>
+  </div>
+
+  <div class="modal" id="promptModal" hidden>
+    <form id="promptForm">
+      <h2 id="promptTitle"></h2>
+      <p id="promptText"></p>
+      <input id="promptInput" autocomplete="off">
+      <div class="err" id="promptError"></div>
+      <div class="row">
+        <button type="button" class="secondary" id="promptCancel">Cancel</button>
+        <button class="primary" id="promptOk"></button>
+      </div>
+    </form>
+  </div>
+
+  <div id="toast" hidden></div>
+
+  <script src="chat-config.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const cfg = window.CHAT_CONFIG || {};
+    const serverUrl = cfg.server || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+    if (cfg.title) document.title = cfg.title;
+
+    const store = {
+      get(key, fallback) { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+      set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} },
+    };
+
+    // ------------------------------------------------------------ state --
+    let ws;
+    let profile = store.get('profile', null);      // { name, avatarData }
+    let profileReady = false;                       // server accepted the profile
+    let publicList = [];
+    let privateList = store.get('privateServers', []); // [{ id, name, icon }]
+    const passwords = {};                            // serverId -> password (this tab only)
+    let currentServer = null;                        // server info we're in
+    let pendingServer = new URLSearchParams(location.search).get('server') || store.get('lastServer', null);
+    let channels = [];
+    let voiceEnabled = false;
+    let current = null;                              // selected text channel id
+    const messages = {};
+    const loaded = new Set();
+    const unread = new Set();
+    let voiceStatesMap = {};
+    const speaking = {};                             // channelId -> Set of ids
+    let voice = null;                                // { channelId, canSpeak, muted }
+
+    // ------------------------------------------------------- connection --
+    function connect() {
+      ws = new WebSocket(serverUrl);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        sendJson({ type: 'servers' });
+        if (profile) sendJson({ type: 'profile', name: profile.name, avatar: profile.avatarData });
+        else openProfile();
+      };
+      ws.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) { playAudio(e.data); return; }
+        handle(JSON.parse(e.data));
+      };
+      ws.onclose = () => {
+        profileReady = false;
+        if (voice) stopVoice();
+        setTimeout(connect, 2000);
+      };
+    }
+
+    function sendJson(data) {
+      if (ws?.readyState === 1) ws.send(JSON.stringify(data));
+    }
+
+    function handle(data) {
+      switch (data.type) {
+        case 'servers':
+          publicList = data.servers;
+          renderRail();
+          break;
+        case 'profile':
+          profileReady = true;
+          $('profileModal').hidden = true;
+          renderMe(data.user);
+          if (pendingServer) joinServer(pendingServer);
+          else if (currentServer) joinServer(currentServer.id);
+          break;
+        case 'profileError':
+          openProfile(data.error);
+          break;
+        case 'serverInfo':
+          closePrompt();
+          rememberPrivate(data.server);
+          joinServer(data.server.id);
+          break;
+        case 'serverInfoError':
+          $('promptError').textContent = data.error;
+          break;
+        case 'joined':
+          onJoined(data);
+          break;
+        case 'joinError':
+          if (data.code === 'password') {
+            delete passwords[data.server];
+            askPassword(data.server, data.error);
+          } else if (data.code !== 'profile') {
+            toast(data.error);
+            if (pendingServer === data.server) pendingServer = null;
+          }
+          break;
+        case 'channels':
+          voiceEnabled = data.voiceEnabled;
+          setChannels(data.channels);
+          break;
+        case 'history':
+          messages[data.channelId] = data.messages;
+          loaded.add(data.channelId);
+          if (data.channelId === current) renderMessages();
+          break;
+        case 'message':
+          addMessage(data.message);
+          break;
+        case 'voiceStates':
+          voiceStatesMap = data.voiceStates;
+          renderChannels();
+          break;
+        case 'speaking':
+          speaking[data.channelId] = new Set(data.ids);
+          renderChannels();
+          break;
+        case 'voiceJoined':
+          startVoice(data.channelId, data.canSpeak);
+          break;
+        case 'voiceLeft':
+          stopVoice();
+          if (data.reason) toast(data.reason);
+          break;
+        case 'kicked':
+          if (voice) stopVoice();
+          toast(data.error);
+          leaveServerView();
+          break;
+        case 'error':
+          toast(data.error);
+          break;
+      }
+    }
+
+    // ---------------------------------------------------------- servers --
+    function allServers() {
+      const ids = new Set(publicList.map((s) => s.id));
+      return [...publicList, ...privateList.filter((s) => !ids.has(s.id)).map((s) => ({ ...s, private: true }))];
+    }
+
+    function rememberPrivate(info) {
+      if (publicList.some((s) => s.id === info.id)) return;
+      privateList = privateList.filter((s) => s.id !== info.id);
+      privateList.push({ id: info.id, name: info.name, icon: info.icon });
+      store.set('privateServers', privateList);
+      renderRail();
+    }
+
+    function renderRail() {
+      const box = $('serverIcons');
+      box.innerHTML = '';
+      for (const s of allServers()) {
+        const b = document.createElement('button');
+        b.className = 'srv' + (currentServer?.id === s.id ? ' active' : '');
+        b.title = s.name + (s.private ? ' (private)' : '');
+        if (s.icon) {
+          const img = document.createElement('img');
+          img.src = s.icon;
+          img.alt = '';
+          b.appendChild(img);
+        } else {
+          b.textContent = s.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 3);
+        }
+        if (s.private) {
+          const lock = document.createElement('span');
+          lock.className = 'lock';
+          lock.textContent = '🔒';
+          b.appendChild(lock);
+        }
+        b.onclick = () => joinServer(s.id);
+        box.appendChild(b);
+      }
+    }
+
+    function joinServer(id) {
+      pendingServer = id;
+      if (!profileReady) return; // joins once the profile is accepted
+      sendJson({ type: 'join', server: id, password: passwords[id] || '' });
+    }
+
+    function onJoined(data) {
+      const switching = currentServer?.id !== data.server.id;
+      currentServer = data.server;
+      pendingServer = null;
+      store.set('lastServer', data.server.id);
+      if (!publicList.some((s) => s.id === data.server.id)) rememberPrivate(data.server);
+      $('serverName').textContent = data.server.name;
+      if (!cfg.title) document.title = data.server.name;
+      if (switching) {
+        if (voice) stopVoice();
+        current = null;
+        for (const k in messages) delete messages[k];
+        loaded.clear();
+        unread.clear();
+      } else {
+        loaded.clear(); // reconnected: refetch so nothing is missed
+      }
+      voiceEnabled = data.voiceEnabled;
+      voiceStatesMap = data.voiceStates;
+      setChannels(data.channels);
+      renderRail();
+    }
+
+    function leaveServerView() {
+      currentServer = null;
+      channels = [];
+      current = null;
+      $('serverName').textContent = 'Pick a server';
+      $('channels').innerHTML = '<div class="empty">Choose a server on the left, or press + to join a private one.</div>';
+      renderMessages();
+      renderRail();
+    }
+
+    // --------------------------------------------------------- channels --
+    function setChannels(list) {
+      channels = list;
+      const text = channels.filter((c) => c.type === 'text');
+      if (!text.some((c) => c.id === current)) current = text[0]?.id ?? null;
+      renderChannels();
+      renderMessages();
+      requestHistory(current);
+    }
+
+    function requestHistory(channelId) {
+      if (channelId && !loaded.has(channelId)) sendJson({ type: 'history', channelId });
+    }
+
+    function renderChannels() {
+      if (!currentServer) return;
+      const box = $('channels');
+      const scroll = box.scrollTop;
+      box.innerHTML = '';
+      if (!channels.length) box.innerHTML = '<div class="empty">No channels you can see here.</div>';
+      let lastCat;
+      for (const c of channels) {
+        if (c.category !== lastCat) {
+          lastCat = c.category;
+          if (c.category) {
+            const cat = document.createElement('div');
+            cat.className = 'category';
+            cat.textContent = c.category;
+            box.appendChild(cat);
+          }
+        }
+        const el = document.createElement('div');
+        const label = document.createElement('span');
+        label.className = 'label';
+        if (c.type === 'voice') {
+          el.className = 'chan' + (voice?.channelId === c.id ? ' connected' : '');
+          label.textContent = '🔊 ' + c.name;
+          el.title = 'Join voice';
+          el.append(label);
+          el.onclick = () => sendJson({ type: 'voiceJoin', channelId: c.id });
+          box.appendChild(el);
+          const people = voiceStatesMap[c.id] || [];
+          if (people.length) {
+            const list = document.createElement('div');
+            list.className = 'people';
+            for (const p of people) {
+              const row = document.createElement('div');
+              row.className = 'person' + (speaking[c.id]?.has(p.id) ? ' speaking' : '');
+              const img = document.createElement('img');
+              img.src = p.avatar || '';
+              img.alt = '';
+              const name = document.createElement('span');
+              name.textContent = p.name;
+              row.append(img, name);
+              if (p.web) {
+                const tag = document.createElement('span');
+                tag.className = 'tag';
+                tag.textContent = 'WEB';
+                row.append(tag);
+              }
+              list.appendChild(row);
+            }
+            box.appendChild(list);
+          }
+        } else {
+          el.className = 'chan' + (c.id === current ? ' active' : '') + (unread.has(c.id) ? ' unread' : '');
+          label.textContent = (c.canSend ? '# ' : '🔒 ') + c.name;
+          const dot = document.createElement('span');
+          dot.className = 'dot';
+          el.append(label, dot);
+          el.onclick = () => {
+            current = c.id;
+            unread.delete(c.id);
+            renderChannels();
+            renderMessages();
+            requestHistory(c.id);
+            if (c.canSend) $('text').focus();
+          };
+          box.appendChild(el);
+        }
+      }
+      box.scrollTop = scroll;
+    }
+
+    // --------------------------------------------------------- messages --
+    function addMessage(m) {
+      const list = (messages[m.channelId] ||= []);
+      if (m.id && list.some((x) => x.id === m.id)) return;
+      list.push(m);
+      if (m.channelId === current) {
+        const box = $('messages');
+        const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 50;
+        box.appendChild(renderMessage(m));
+        if (atBottom) box.scrollTop = box.scrollHeight;
+      } else {
+        unread.add(m.channelId);
+        renderChannels();
+      }
+    }
+
+    function renderMessages() {
+      const chan = channels.find((c) => c.id === current);
+      $('channelTitle').textContent = chan ? '# ' + chan.name : '';
+      const canSend = Boolean(chan?.canSend);
+      $('text').disabled = $('sendButton').disabled = !canSend;
+      $('text').placeholder = !chan ? '' : canSend
+        ? `Message #${chan.name} (type @name to ping)`
+        : `You do not have permission to send messages in #${chan.name}`;
+      const box = $('messages');
+      box.innerHTML = '';
+      if (chan && !loaded.has(chan.id)) {
+        const note = document.createElement('div');
+        note.className = 'note';
+        note.textContent = 'Loading messages…';
+        box.appendChild(note);
+      }
+      for (const m of messages[current] || []) box.appendChild(renderMessage(m));
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function linkify(el, text) {
+      for (const part of text.split(/(https?:\/\/\S+)/g)) {
+        if (/^https?:\/\//.test(part)) {
+          const a = document.createElement('a');
+          a.href = part; a.textContent = part; a.target = '_blank'; a.rel = 'noopener noreferrer';
+          el.appendChild(a);
+        } else {
+          el.appendChild(document.createTextNode(part));
+        }
+      }
+    }
+
+    function formatTime(t) {
+      const d = new Date(t);
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString()} ${time}`;
+    }
+
+    function renderMessage(m) {
+      const row = document.createElement('div');
+      row.className = 'msg';
+      let av;
+      if (m.avatar) {
+        av = document.createElement('img');
+        av.src = m.avatar;
+        av.alt = '';
+      } else {
+        av = document.createElement('div');
+        av.textContent = (m.name || '?').replace('[DISCORD] ', '')[0].toUpperCase();
+      }
+      av.className = 'avatar';
+      const body = document.createElement('div');
+      const name = document.createElement('span');
+      name.className = 'name' + (m.source === 'discord' ? ' discord' : '');
+      name.textContent = m.name;
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = formatTime(m.time) + (m.thread ? ` · thread: ${m.thread}` : '');
+      const content = document.createElement('div');
+      content.className = 'content';
+      linkify(content, m.content);
+      body.append(name, meta, content);
+      row.append(av, body);
+      return row;
+    }
+
+    $('send').onsubmit = (e) => {
+      e.preventDefault();
+      const chan = channels.find((c) => c.id === current);
+      const content = $('text').value.trim();
+      if (!content || !chan?.canSend || ws?.readyState !== 1) return;
+      sendJson({ type: 'chat', channelId: current, content });
+      $('text').value = '';
+    };
+
+    // ---------------------------------------------------------- profile --
+    let draftAvatar = profile?.avatarData ?? null;
+
+    function renderMe(user) {
+      $('meAvatar').src = profile.avatarData;
+      $('meName').textContent = user?.name ?? profile.name;
+    }
+
+    function openProfile(error = '') {
+      draftAvatar = profile?.avatarData ?? null;
+      $('pfpPreview').src = draftAvatar || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+      $('pfpButton').textContent = draftAvatar ? 'Change picture' : 'Upload profile picture';
+      $('nameInput').value = profile?.name ?? '';
+      $('profileError').textContent = error;
+      $('profileModal').hidden = false;
+    }
+
+    // Crop the chosen image to a centered square and shrink it to 128x128.
+    $('pfpButton').onclick = () => $('pfpFile').click();
+    $('pfpFile').onchange = () => {
+      const file = $('pfpFile').files[0];
+      $('pfpFile').value = '';
+      if (!file) return;
+      const img = new Image();
+      img.onload = () => {
+        const size = Math.min(img.width, img.height);
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 128;
+        canvas.getContext('2d').drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 128, 128);
+        draftAvatar = canvas.toDataURL('image/png');
+        $('pfpPreview').src = draftAvatar;
+        $('pfpButton').textContent = 'Change picture';
+        $('profileError').textContent = '';
+        URL.revokeObjectURL(img.src);
+      };
+      img.onerror = () => { $('profileError').textContent = 'That file is not an image.'; };
+      img.src = URL.createObjectURL(file);
+    };
+
+    $('profileForm').onsubmit = (e) => {
+      e.preventDefault();
+      const name = $('nameInput').value.trim();
+      if (!draftAvatar) { $('profileError').textContent = 'Upload a profile picture first.'; return; }
+      if (!name) { $('profileError').textContent = 'Pick a name.'; return; }
+      profile = { name, avatarData: draftAvatar };
+      store.set('profile', profile);
+      sendJson({ type: 'profile', name, avatar: draftAvatar });
+    };
+    $('editProfile').onclick = () => openProfile();
+
+    // ---------------------------------------------------- prompt dialog --
+    let promptAction = null;
+
+    function openPrompt({ title, text, placeholder, ok, type = 'text', error = '', action }) {
+      $('promptTitle').textContent = title;
+      $('promptText').textContent = text;
+      $('promptInput').type = type;
+      $('promptInput').placeholder = placeholder;
+      $('promptInput').value = '';
+      $('promptOk').textContent = ok;
+      $('promptError').textContent = error;
+      promptAction = action;
+      $('promptModal').hidden = false;
+      $('promptInput').focus();
+    }
+
+    function closePrompt() {
+      $('promptModal').hidden = true;
+      promptAction = null;
+    }
+
+    $('promptForm').onsubmit = (e) => {
+      e.preventDefault();
+      const value = $('promptInput').value.trim();
+      if (value && promptAction) promptAction(value);
+    };
+    $('promptCancel').onclick = closePrompt;
+
+    $('addServer').onclick = () => openPrompt({
+      title: 'Join a private server',
+      text: 'Paste the server ID. Server admins can find it with /webchat status.',
+      placeholder: 'Server ID',
+      ok: 'Join',
+      action: (id) => {
+        if (!/^\d{15,25}$/.test(id)) { $('promptError').textContent = 'That doesn\'t look like a server ID.'; return; }
+        $('promptError').textContent = '';
+        sendJson({ type: 'serverInfo', server: id });
+      },
+    });
+
+    function askPassword(serverId, error) {
+      const name = allServers().find((s) => s.id === serverId)?.name ?? 'This server';
+      openPrompt({
+        title: 'Password needed',
+        text: `${name} needs a password to join.`,
+        placeholder: 'Password',
+        ok: 'Join',
+        type: 'password',
+        error: error === 'Wrong password.' ? error : '',
+        action: (pw) => {
+          passwords[serverId] = pw;
+          closePrompt();
+          joinServer(serverId);
+        },
+      });
+    }
+
+    let toastTimer;
+    function toast(text) {
+      $('toast').textContent = text;
+      $('toast').hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4000);
+    }
+
+    // ------------------------------------------------------------ voice --
+    // Audio goes over the websocket as 20ms frames of 48kHz mono 16-bit PCM.
+    const WORKLETS = `
+      class Mic extends AudioWorkletProcessor {
+        constructor() { super(); this.buf = new Int16Array(960); this.n = 0; this.hang = 0; }
+        process(inputs) {
+          const input = inputs[0][0];
+          if (!input) return true;
+          for (let i = 0; i < input.length; i++) {
+            const s = Math.max(-1, Math.min(1, input[i]));
+            this.buf[this.n++] = s * 32767;
+            if (this.n === 960) {
+              let sum = 0;
+              for (let j = 0; j < 960; j++) sum += this.buf[j] * this.buf[j];
+              const rms = Math.sqrt(sum / 960) / 32768;
+              if (rms > 0.01) this.hang = 15; // ~300ms hold after speech so words aren't cut off
+              if (this.hang > 0) { this.hang--; this.port.postMessage(this.buf.buffer.slice(0)); }
+              this.n = 0;
+            }
+          }
+          return true;
+        }
+      }
+      class Player extends AudioWorkletProcessor {
+        constructor() {
+          super();
+          this.queue = []; this.cur = null; this.pos = 0; this.primed = false;
+          this.port.onmessage = (e) => {
+            this.queue.push(new Int16Array(e.data));
+            if (this.queue.length > 25) this.queue.splice(0, this.queue.length - 5); // too far behind: catch up
+          };
+        }
+        process(_, outputs) {
+          const out = outputs[0][0];
+          for (let i = 0; i < out.length; i++) {
+            if (!this.cur) {
+              if (!this.primed) {
+                if (this.queue.length < 3) { out[i] = 0; continue; }
+                this.primed = true;
+              }
+              this.cur = this.queue.shift(); this.pos = 0;
+              if (!this.cur) { this.primed = false; out[i] = 0; continue; }
+            }
+            out[i] = this.cur[this.pos++] / 32768;
+            if (this.pos >= this.cur.length) this.cur = null;
+          }
+          return true;
+        }
+      }
+      registerProcessor('mic', Mic);
+      registerProcessor('player', Player);
+    `;
+    let audioCtx = null;
+    let micStream = null;
+    let playerNode = null;
+
+    async function startVoice(channelId, canSpeak) {
+      if (voice) await teardownAudio();
+      voice = { channelId, canSpeak, muted: false };
+      try {
+        audioCtx = new AudioContext({ sampleRate: 48000 });
+        const url = URL.createObjectURL(new Blob([WORKLETS], { type: 'application/javascript' }));
+        await audioCtx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+        playerNode = new AudioWorkletNode(audioCtx, 'player', { outputChannelCount: [1] });
+        playerNode.connect(audioCtx.destination);
+
+        if (canSpeak) {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          });
+          const mic = new AudioWorkletNode(audioCtx, 'mic');
+          mic.port.onmessage = (e) => { if (voice && !voice.muted && ws?.readyState === 1) ws.send(e.data); };
+          const sink = audioCtx.createGain();
+          sink.gain.value = 0;
+          audioCtx.createMediaStreamSource(micStream).connect(mic).connect(sink).connect(audioCtx.destination);
+        }
+        await audioCtx.resume();
+      } catch (err) {
+        toast(err.name === 'NotAllowedError'
+          ? 'Microphone access was blocked. You can listen, but not talk.'
+          : 'Could not start audio: ' + err.message);
+        if (voice) voice.canSpeak = Boolean(micStream);
+      }
+      renderVoicePanel();
+      renderChannels();
+    }
+
+    async function teardownAudio() {
+      micStream?.getTracks().forEach((t) => t.stop());
+      micStream = null;
+      playerNode = null;
+      if (audioCtx) { const ctx = audioCtx; audioCtx = null; await ctx.close().catch(() => {}); }
+    }
+
+    function stopVoice() {
+      voice = null;
+      teardownAudio();
+      renderVoicePanel();
+      renderChannels();
+    }
+
+    function playAudio(buf) {
+      playerNode?.port.postMessage(buf, [buf]);
+    }
+
+    function renderVoicePanel() {
+      $('voicePanel').hidden = !voice;
+      if (!voice) return;
+      const chan = channels.find((c) => c.id === voice.channelId);
+      $('voiceWhere').textContent = (chan ? chan.name : '') + (voice.canSpeak ? '' : ' · listen only');
+      $('muteBtn').hidden = !voice.canSpeak;
+      $('muteBtn').classList.toggle('off', voice.muted);
+      $('muteBtn').title = voice.muted ? 'Unmute' : 'Mute';
+      $('muteBtn').textContent = voice.muted ? '🔇' : '🎙️';
+    }
+
+    $('muteBtn').onclick = () => {
+      if (!voice) return;
+      voice.muted = !voice.muted;
+      renderVoicePanel();
+    };
+    $('leaveBtn').onclick = () => {
+      sendJson({ type: 'voiceLeave' });
+      stopVoice();
+    };
+
+    // -------------------------------------------------------------- go --
+    if (profile) renderMe();
+    renderRail();
+    connect();
+  </script>
+</body>
+</html>

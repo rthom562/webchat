@@ -1,0 +1,11 @@
+{
+  "discord": {
+    "token": "PASTE_BOT_TOKEN_HERE"
+  },
+  "web": {
+    "port": 3080,
+    "chatPage": "./public",
+    "chatPageUrl": "http://localhost:3080",
+    "serverUrl": ""
+  }
+}
